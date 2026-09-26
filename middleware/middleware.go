@@ -160,10 +160,13 @@ func CORS(cfg ...CORSConfig) pisigo.Middleware {
 			}
 
 			if c.Method() == http.MethodOptions {
-				c.Header("Access-Control-Allow-Methods", allowMethods)
-				c.Header("Access-Control-Allow-Headers", allowHeaders)
-				if config.MaxAge > 0 {
-					c.Header("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
+				// Only advertise allow metadata when the Origin is permitted.
+				if acaOrigin != "" {
+					c.Header("Access-Control-Allow-Methods", allowMethods)
+					c.Header("Access-Control-Allow-Headers", allowHeaders)
+					if config.MaxAge > 0 {
+						c.Header("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
+					}
 				}
 				return c.NoContent()
 			}
@@ -172,6 +175,11 @@ func CORS(cfg ...CORSConfig) pisigo.Middleware {
 	}
 }
 
+// Timeout cancels the request context after d and returns 504 if the handler
+// has not finished. It does not buffer the response: if the handler already
+// committed headers/body, the timeout cannot replace that response with 504.
+// Handlers must respect c.Request().Context(); work that ignores cancellation
+// may keep running until it finishes while the client already received 504.
 func Timeout(d time.Duration) pisigo.Middleware {
 	return func(next pisigo.HandlerFunc) pisigo.HandlerFunc {
 		return func(c *pisigo.Context) error {
@@ -182,6 +190,7 @@ func Timeout(d time.Duration) pisigo.Middleware {
 			orig := c.Response()
 			tw := &timeoutWriter{w: orig, h: make(http.Header)}
 			c.SetWriter(tw)
+			c.EnableShared()
 
 			done := make(chan error, 1)
 			go func() {
@@ -195,6 +204,7 @@ func Timeout(d time.Duration) pisigo.Middleware {
 
 			select {
 			case err := <-done:
+				c.DisableShared()
 				tw.mu.Lock()
 				code := tw.code
 				wrote := tw.wroteHeader
@@ -207,12 +217,23 @@ func Timeout(d time.Duration) pisigo.Middleware {
 			case <-ctx.Done():
 				// Write 504 under the timeoutWriter lock, then keep tw as the
 				// handler's writer so late writes are discarded without racing
-				// the real ResponseWriter. HoldForHandler protects the pool.
+				// the real ResponseWriter. Shared mode stays on until the
+				// handler finishes; HoldForHandler protects the pool.
 				body := []byte(`{"message":"gateway timeout"}` + "\n")
-				_ = tw.fail(http.StatusGatewayTimeout, body)
+				wrote := tw.fail(http.StatusGatewayTimeout, body)
+				if wrote {
+					c.MarkWritten(http.StatusGatewayTimeout)
+				} else {
+					// Handler already committed; surface that status to Logger.
+					tw.mu.Lock()
+					code := tw.code
+					tw.mu.Unlock()
+					c.MarkWritten(code)
+				}
 				hold := make(chan struct{})
 				go func() {
 					<-done
+					c.DisableShared()
 					close(hold)
 				}()
 				c.HoldForHandler(hold)
@@ -300,6 +321,9 @@ func (w *timeoutWriter) Flush() {
 	defer w.mu.Unlock()
 	if w.timedOut {
 		return
+	}
+	if !w.wroteHeader {
+		w.writeHeaderLocked(http.StatusOK)
 	}
 	if f, ok := w.w.(http.Flusher); ok {
 		f.Flush()

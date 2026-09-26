@@ -14,13 +14,18 @@ import (
 )
 
 func (c *Context) Request() *http.Request {
+	locked := c.rlock()
+	defer c.runlock(locked)
 	return c.request
 }
 
 func (c *Context) SetRequest(r *http.Request) {
-	if r != nil {
-		c.request = r
+	if r == nil {
+		return
 	}
+	locked := c.lock()
+	defer c.unlock(locked)
+	c.request = r
 }
 
 func (c *Context) Method() string {

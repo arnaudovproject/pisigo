@@ -183,7 +183,7 @@ return pisigo.NewHTTPError(400, "invalid input").WithDetails(map[string]any{
 | `Logger` | Structured request logging (no bodies/secrets by default) |
 | `RequestID` | `X-Request-ID` propagation (validated; max 128 chars `[A-Za-z0-9_-]`) |
 | `CORS` | Cross-origin headers (credentials-safe) |
-| `Timeout` | Request timeout — returns 504 without blocking on slow handlers; handlers must respect `c.Request().Context()` |
+| `Timeout` | Request timeout — returns 504 without blocking on slow handlers; cannot replace an already-committed response; handlers must respect `c.Request().Context()` |
 | `Secure` | Security headers; HSTS only for TLS or trusted-proxy HTTPS |
 | `BasicAuth` | HTTP Basic |
 | `RateLimit` | Token / window limiting |
@@ -234,7 +234,7 @@ Use these defaults and settings for internet-facing services:
 7. **Metrics** — protect the endpoint: `m.Register(app, "/metrics", middleware.BasicAuth(...))`.
 8. **Realtime (SSE/WS)** — use `pisigo.StreamingServerConfig()` (WriteTimeout disabled) or set timeouts explicitly via `ServerWithConfig`.
 9. **Rate limit** — store errors fail closed (503); prefer Redis rate limit store in multi-instance deployments.
-10. **Timeout** — handlers must respect `c.Request().Context()`; Timeout returns 504 promptly and does not wait for ignored cancellation.
+10. **Timeout** — handlers must respect `c.Request().Context()`; Timeout returns 504 promptly and does not wait for ignored cancellation. If the handler already wrote headers/body, Timeout cannot replace that response with 504 (HTTP responses are not rewindable).
 11. **Server errors** — `Server` / `ServerWithConfig` return `error` (e.g. bind failure); always check it.
 
 ```go

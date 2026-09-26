@@ -44,7 +44,7 @@ Sessions: `session.Middleware(session.Config{Store: session.NewMemoryStore()})` 
 ## Middleware order
 
 `Recover` → `RequestID` → `Logger` → security/CORS → auth → feature middleware → handler.
-`Timeout` needs handlers that respect `c.Request().Context()`; it returns 504 without blocking on slow handlers.
+`Timeout` needs handlers that respect `c.Request().Context()`; it returns 504 without blocking on slow handlers. It does not buffer the response — committed headers/body cannot be replaced with 504.
 `RequestID` accepts only `[A-Za-z0-9_-]` up to 128 chars; invalid inbound IDs are replaced.
 `Secure` sets HSTS only when `c.IsHTTPS()` (TLS or trusted-proxy HTTPS).
 Context is pooled — do not use after the handler returns unless `DetachFromPool()` + `Release()`.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 var contextPool = sync.Pool{
@@ -23,6 +24,9 @@ var contextPool = sync.Pool{
 // Context is request-scoped and may be reused from a pool after the handler
 // returns. Do not retain or access a Context from another goroutine after the
 // handler returns unless you call DetachFromPool and later Release.
+//
+// Timeout middleware enables shared mode so the request goroutine and the
+// handler goroutine may safely use the same Context until the handler finishes.
 type Context struct {
 	app             *App
 	writer          http.ResponseWriter
@@ -36,6 +40,8 @@ type Context struct {
 	maxBody         int64
 	skipPoolRelease bool
 	holdDone        <-chan struct{}
+	mu              sync.RWMutex
+	shared          atomic.Bool
 }
 
 func NewContext(w http.ResponseWriter, r *http.Request) *Context {
@@ -51,6 +57,7 @@ func acquireContext(app *App, w http.ResponseWriter, r *http.Request, logger Log
 }
 
 func releaseContext(c *Context) {
+	c.shared.Store(false)
 	for k := range c.store {
 		delete(c.store, k)
 	}
@@ -81,12 +88,54 @@ func (c *Context) HoldForHandler(done <-chan struct{}) {
 	c.holdDone = done
 }
 
+// EnableShared marks this Context safe for concurrent use by Timeout's
+// handler goroutine and the request goroutine. Call DisableShared only after
+// the handler goroutine has finished.
+func (c *Context) EnableShared() {
+	c.shared.Store(true)
+}
+
+// DisableShared ends concurrent Context access. Only call after the handler
+// goroutine has returned.
+func (c *Context) DisableShared() {
+	c.shared.Store(false)
+}
+
+func (c *Context) lock() bool {
+	if c.shared.Load() {
+		c.mu.Lock()
+		return true
+	}
+	return false
+}
+
+func (c *Context) unlock(locked bool) {
+	if locked {
+		c.mu.Unlock()
+	}
+}
+
+func (c *Context) rlock() bool {
+	if c.shared.Load() {
+		c.mu.RLock()
+		return true
+	}
+	return false
+}
+
+func (c *Context) runlock(locked bool) {
+	if locked {
+		c.mu.RUnlock()
+	}
+}
+
 // Release returns a previously detached Context to the pool.
 func (c *Context) Release() {
 	releaseContext(c)
 }
 
 func (c *Context) reset(w http.ResponseWriter, r *http.Request, app *App, logger Logger, maxBody int64) {
+	c.shared.Store(false)
 	c.app = app
 	c.writer = w
 	c.request = r
@@ -104,15 +153,21 @@ func (c *Context) reset(w http.ResponseWriter, r *http.Request, app *App, logger
 }
 
 func (c *Context) Set(key string, value any) {
+	locked := c.lock()
+	defer c.unlock(locked)
 	c.store[key] = value
 }
 
 func (c *Context) Get(key string) (any, bool) {
+	locked := c.rlock()
+	defer c.runlock(locked)
 	value, ok := c.store[key]
 	return value, ok
 }
 
 func (c *Context) MustGet(key string) any {
+	locked := c.rlock()
+	defer c.runlock(locked)
 	value, ok := c.store[key]
 	if !ok {
 		panic("pisigo: key not found in context store: " + key)
@@ -121,18 +176,27 @@ func (c *Context) MustGet(key string) any {
 }
 
 func (c *Context) Written() bool {
-	if c.written {
-		return true
-	}
+	locked := c.rlock()
+	defer c.runlock(locked)
+	// Prefer the recorder: Timeout may commit via timeoutWriter while c.written
+	// is still false, and recorder access is mutex-protected.
 	if rec := findRecorder(c.writer); rec != nil {
-		return rec.written
+		_, written := rec.snapshot()
+		if written {
+			return true
+		}
 	}
-	return false
+	return c.written
 }
 
 func (c *Context) StatusCode() int {
-	if rec := findRecorder(c.writer); rec != nil && rec.written {
-		return rec.status
+	locked := c.rlock()
+	defer c.runlock(locked)
+	if rec := findRecorder(c.writer); rec != nil {
+		status, written := rec.snapshot()
+		if written {
+			return status
+		}
 	}
 	return c.status
 }
@@ -140,25 +204,27 @@ func (c *Context) StatusCode() int {
 // MarkWritten records that a response was already committed (status + body),
 // so the error handler will not write again.
 func (c *Context) MarkWritten(status int) {
+	locked := c.lock()
+	defer c.unlock(locked)
 	if status != 0 {
 		c.status = status
 	}
 	c.written = true
 	if rec := findRecorder(c.writer); rec != nil {
-		rec.written = true
-		if status != 0 {
-			rec.status = status
-		}
+		rec.mark(status)
 	}
 }
 
 // syncFromWriter copies status/written flags from the response recorder after
 // helpers that write through net/http directly (ServeFile, FileServer, …).
 func (c *Context) syncFromWriter() {
+	locked := c.lock()
+	defer c.unlock(locked)
 	if rec := findRecorder(c.writer); rec != nil {
-		c.written = rec.written
-		if rec.written {
-			c.status = rec.status
+		status, written := rec.snapshot()
+		c.written = written
+		if written {
+			c.status = status
 		}
 		return
 	}
@@ -187,6 +253,8 @@ func (c *Context) IsHTTPS() bool {
 }
 
 func (c *Context) Log() Logger {
+	locked := c.rlock()
+	defer c.runlock(locked)
 	if c.logger == nil {
 		return DefaultLogger()
 	}
@@ -194,9 +262,12 @@ func (c *Context) Log() Logger {
 }
 
 func (c *Context) SetLogger(logger Logger) {
-	if logger != nil {
-		c.logger = logger
+	if logger == nil {
+		return
 	}
+	locked := c.lock()
+	defer c.unlock(locked)
+	c.logger = logger
 }
 
 func (c *Context) App() *App {

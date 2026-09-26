@@ -64,7 +64,7 @@ pisigo install agents all   # refresh AI agent rules
 ## Hard rules
 
 1. Prefer interfaces at service boundaries; put Redis/NATS/SQL types in adapters/repository.
-2. Middleware order: Recover first; Timeout requires context-aware handlers (returns 504 without waiting for ignored cancellation).
+2. Middleware order: Recover first; Timeout requires context-aware handlers (returns 504 without waiting for ignored cancellation; cannot rewrite an already-committed response).
 3. Do not call `mux.Handler` patterns that skip PathValue — use Pisigo routing APIs only.
 4. Check `app.Server` / `ServerWithConfig` errors; never ignore listen/bind failures.
 5. Keep this file and agent rules accurate when conventions change.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 )
 
 // responseRecorder tracks the real HTTP status and bytes written so helpers
@@ -15,6 +16,7 @@ import (
 // consistent with Logger and StatusCode().
 type responseRecorder struct {
 	http.ResponseWriter
+	mu      sync.Mutex
 	status  int
 	written bool
 	size    int64
@@ -28,6 +30,12 @@ func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
 }
 
 func (w *responseRecorder) WriteHeader(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writeHeaderLocked(code)
+}
+
+func (w *responseRecorder) writeHeaderLocked(code int) {
 	if w.written {
 		return
 	}
@@ -40,8 +48,10 @@ func (w *responseRecorder) WriteHeader(code int) {
 }
 
 func (w *responseRecorder) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if !w.written {
-		w.WriteHeader(http.StatusOK)
+		w.writeHeaderLocked(http.StatusOK)
 	}
 	n, err := w.ResponseWriter.Write(b)
 	w.size += int64(n)
@@ -53,6 +63,11 @@ func (w *responseRecorder) Unwrap() http.ResponseWriter {
 }
 
 func (w *responseRecorder) Flush() {
+	w.mu.Lock()
+	if !w.written {
+		w.writeHeaderLocked(http.StatusOK)
+	}
+	w.mu.Unlock()
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
@@ -72,6 +87,21 @@ func (w *responseRecorder) Push(target string, opts *http.PushOptions) error {
 		return http.ErrNotSupported
 	}
 	return p.Push(target, opts)
+}
+
+func (w *responseRecorder) snapshot() (status int, written bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.status, w.written
+}
+
+func (w *responseRecorder) mark(status int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.written = true
+	if status != 0 {
+		w.status = status
+	}
 }
 
 func findRecorder(w http.ResponseWriter) *responseRecorder {
