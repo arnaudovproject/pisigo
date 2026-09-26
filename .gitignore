@@ -11,7 +11,9 @@ Thumbs.db
 .claude/
 .codex/
 .github/copilot*
-AGENTS.md
+# Ignore app-root AGENTS.md only — keep CLI embed templates tracked
+/AGENTS.md
+!cmd/pisigo/templates/agents/codex/AGENTS.md
 .agent/
 .agents/
 
