@@ -43,12 +43,12 @@ func StreamingServerConfig() ServerConfig {
 	return cfg
 }
 
-func (a *App) Server(host string, port int) {
-	_ = a.ListenAndServe(fmt.Sprintf("%s:%d", host, port), DefaultServerConfig())
+func (a *App) Server(host string, port int) error {
+	return a.ListenAndServe(fmt.Sprintf("%s:%d", host, port), DefaultServerConfig())
 }
 
-func (a *App) ServerWithConfig(host string, port int, cfg ServerConfig) {
-	_ = a.ListenAndServe(fmt.Sprintf("%s:%d", host, port), cfg)
+func (a *App) ServerWithConfig(host string, port int, cfg ServerConfig) error {
+	return a.ListenAndServe(fmt.Sprintf("%s:%d", host, port), cfg)
 }
 
 func (a *App) ListenAndServe(addr string, cfg ServerConfig) error {

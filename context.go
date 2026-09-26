@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -19,6 +20,9 @@ var contextPool = sync.Pool{
 	},
 }
 
+// Context is request-scoped and may be reused from a pool after the handler
+// returns. Do not retain or access a Context from another goroutine after the
+// handler returns unless you call DetachFromPool and later Release.
 type Context struct {
 	app             *App
 	writer          http.ResponseWriter
@@ -31,6 +35,7 @@ type Context struct {
 	bodyRead        bool
 	maxBody         int64
 	skipPoolRelease bool
+	holdDone        <-chan struct{}
 }
 
 func NewContext(w http.ResponseWriter, r *http.Request) *Context {
@@ -59,6 +64,7 @@ func releaseContext(c *Context) {
 	c.written = false
 	c.maxBody = 0
 	c.skipPoolRelease = false
+	c.holdDone = nil
 	contextPool.Put(c)
 }
 
@@ -66,6 +72,13 @@ func releaseContext(c *Context) {
 // The caller must invoke Release when the Context is no longer used.
 func (c *Context) DetachFromPool() {
 	c.skipPoolRelease = true
+}
+
+// HoldForHandler keeps the Context alive until done is signaled, after the
+// middleware chain finishes. Used by Timeout so the request can return 504
+// without waiting for a slow handler, while still protecting the pool.
+func (c *Context) HoldForHandler(done <-chan struct{}) {
+	c.holdDone = done
 }
 
 // Release returns a previously detached Context to the pool.
@@ -83,6 +96,8 @@ func (c *Context) reset(w http.ResponseWriter, r *http.Request, app *App, logger
 	c.body = nil
 	c.bodyRead = false
 	c.maxBody = maxBody
+	c.skipPoolRelease = false
+	c.holdDone = nil
 	if c.store == nil {
 		c.store = make(map[string]any)
 	}
@@ -106,11 +121,69 @@ func (c *Context) MustGet(key string) any {
 }
 
 func (c *Context) Written() bool {
-	return c.written
+	if c.written {
+		return true
+	}
+	if rec := findRecorder(c.writer); rec != nil {
+		return rec.written
+	}
+	return false
 }
 
 func (c *Context) StatusCode() int {
+	if rec := findRecorder(c.writer); rec != nil && rec.written {
+		return rec.status
+	}
 	return c.status
+}
+
+// MarkWritten records that a response was already committed (status + body),
+// so the error handler will not write again.
+func (c *Context) MarkWritten(status int) {
+	if status != 0 {
+		c.status = status
+	}
+	c.written = true
+	if rec := findRecorder(c.writer); rec != nil {
+		rec.written = true
+		if status != 0 {
+			rec.status = status
+		}
+	}
+}
+
+// syncFromWriter copies status/written flags from the response recorder after
+// helpers that write through net/http directly (ServeFile, FileServer, …).
+func (c *Context) syncFromWriter() {
+	if rec := findRecorder(c.writer); rec != nil {
+		c.written = rec.written
+		if rec.written {
+			c.status = rec.status
+		}
+		return
+	}
+	c.written = true
+}
+
+// IsHTTPS reports whether the request arrived over TLS, or was forwarded as
+// HTTPS by a trusted proxy (X-Forwarded-Proto). Untrusted clients cannot
+// spoof HTTPS via X-Forwarded-Proto alone.
+func (c *Context) IsHTTPS() bool {
+	if c.request != nil && c.request.TLS != nil {
+		return true
+	}
+	if c.app == nil || len(c.app.trustedProxies) == 0 || c.request == nil {
+		return false
+	}
+	remote := remoteIP(c.request.RemoteAddr)
+	if !ipTrusted(remote, c.app.trustedProxies) {
+		return false
+	}
+	proto := c.request.Header.Get("X-Forwarded-Proto")
+	if i := strings.IndexByte(proto, ','); i >= 0 {
+		proto = proto[:i]
+	}
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
 func (c *Context) Log() Logger {

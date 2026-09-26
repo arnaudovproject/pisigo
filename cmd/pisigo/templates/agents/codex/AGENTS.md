@@ -13,13 +13,16 @@ Build and change this codebase using Pisigo primitives. Minimize new dependencie
 app := pisigo.Boot()
 app.Use(middleware.Recover(), middleware.RequestID(), middleware.Logger(), middleware.Secure())
 // register routes...
-app.Server("0.0.0.0", cfg.Int("PORT", 8080))
+if err := app.Server("0.0.0.0", cfg.Int("PORT", 8080)); err != nil {
+	log.Fatal(err)
+}
 ```
 
 Handler signature: `func(c *pisigo.Context) error`.  
 Input: `c.Bind(&in)` with `json`/`validate` tags.  
 Output: `c.JSON`, `c.String`, `c.NoContent`, …  
 Errors: return `pisigo.Err*` or `pisigo.NewHTTPError`.
+Context is request-scoped and pooled — do not use after the handler returns unless `DetachFromPool()` + `Release()`.
 
 ## Where code should live
 
@@ -61,7 +64,8 @@ pisigo install agents all   # refresh AI agent rules
 ## Hard rules
 
 1. Prefer interfaces at service boundaries; put Redis/NATS/SQL types in adapters/repository.
-2. Middleware order: Recover first; Timeout requires context-aware handlers.
+2. Middleware order: Recover first; Timeout requires context-aware handlers (returns 504 without waiting for ignored cancellation).
 3. Do not call `mux.Handler` patterns that skip PathValue — use Pisigo routing APIs only.
-4. Keep this file and agent rules accurate when conventions change.
-5. English for user-facing docs and commit messages intended for shared repos.
+4. Check `app.Server` / `ServerWithConfig` errors; never ignore listen/bind failures.
+5. Keep this file and agent rules accurate when conventions change.
+6. English for user-facing docs and commit messages intended for shared repos.

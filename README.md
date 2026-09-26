@@ -49,6 +49,8 @@ go install github.com/arnaudovproject/pisigo/cmd/pisigo@latest
 package main
 
 import (
+	"log"
+
 	"github.com/arnaudovproject/pisigo"
 	"github.com/arnaudovproject/pisigo/middleware"
 )
@@ -66,7 +68,9 @@ func main() {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
 
-	app.Server("0.0.0.0", 8080)
+	if err := app.Server("0.0.0.0", 8080); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
@@ -151,7 +155,9 @@ Supported methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `
 | Request | `Param`, `Query`, `Bind`, `BindJSON`, `FormValue`, `BearerToken`, `Body` |
 | Response | `JSON`, `HTML`, `XML`, `String`, `Data`, `File`, `Download`, `Redirect`, `NoContent` |
 | Store | `Set`, `Get`, `MustGet` |
-| Misc | `IP`, `Log`, `Cookie`, `Header` |
+| Misc | `IP`, `IsHTTPS`, `Log`, `Cookie`, `Header` |
+
+**Pooling:** Context values are reused from a `sync.Pool`. Do not retain or access a `*pisigo.Context` after the handler returns (including from another goroutine) unless you call `DetachFromPool()` and later `Release()`.
 
 ### Errors
 
@@ -173,12 +179,12 @@ return pisigo.NewHTTPError(400, "invalid input").WithDetails(map[string]any{
 
 | Middleware | Purpose |
 |------------|---------|
-| `Recover` | Panic recovery |
-| `Logger` | Structured request logging |
-| `RequestID` | `X-Request-ID` propagation |
+| `Recover` | Panic recovery (stack stays in logs, client gets generic 500) |
+| `Logger` | Structured request logging (no bodies/secrets by default) |
+| `RequestID` | `X-Request-ID` propagation (validated; max 128 chars `[A-Za-z0-9_-]`) |
 | `CORS` | Cross-origin headers (credentials-safe) |
-| `Timeout` | Request timeout (context-aware) |
-| `Secure` | Security headers |
+| `Timeout` | Request timeout — returns 504 without blocking on slow handlers; handlers must respect `c.Request().Context()` |
+| `Secure` | Security headers; HSTS only for TLS or trusted-proxy HTTPS |
 | `BasicAuth` | HTTP Basic |
 | `RateLimit` | Token / window limiting |
 | `Compress` | Gzip responses |
@@ -220,7 +226,7 @@ app.Use(session.Middleware(session.Config{
 Use these defaults and settings for internet-facing services:
 
 1. **CORS** — allowlist exact origins; never combine `AllowOrigins: ["*"]` with `AllowCredentials: true` (Pisigo ignores the wildcard in that case).
-2. **Trusted proxies** — call `app.SetTrustedProxies(...)` only for your load balancer / reverse proxy CIDRs. Client IP walks `X-Forwarded-For` from the right and skips trusted hops.
+2. **Trusted proxies** — call `app.SetTrustedProxies(...)` only for your load balancer / reverse proxy CIDRs. Client IP and `IsHTTPS()` / HSTS honor forwarded headers only from trusted peers.
 3. **Cookies** — session and CSRF cookies are `Secure` by default; use `InsecureCookie: true` / `CSRF(CSRFConfig{Secure: false})` only on plain HTTP.
 4. **WebSocket** — default `CheckOrigin` is same-origin; pass a custom allowlist via `websocket.Config` if needed.
 5. **Postgres** — DSN default `sslmode=require`; set `SSLMode: "disable"` only for local databases.
@@ -228,9 +234,13 @@ Use these defaults and settings for internet-facing services:
 7. **Metrics** — protect the endpoint: `m.Register(app, "/metrics", middleware.BasicAuth(...))`.
 8. **Realtime (SSE/WS)** — use `pisigo.StreamingServerConfig()` (WriteTimeout disabled) or set timeouts explicitly via `ServerWithConfig`.
 9. **Rate limit** — store errors fail closed (503); prefer Redis rate limit store in multi-instance deployments.
+10. **Timeout** — handlers must respect `c.Request().Context()`; Timeout returns 504 promptly and does not wait for ignored cancellation.
+11. **Server errors** — `Server` / `ServerWithConfig` return `error` (e.g. bind failure); always check it.
 
 ```go
-app.ServerWithConfig("0.0.0.0", 8080, pisigo.StreamingServerConfig())
+if err := app.ServerWithConfig("0.0.0.0", 8080, pisigo.StreamingServerConfig()); err != nil {
+	log.Fatal(err)
+}
 ```
 
 ---

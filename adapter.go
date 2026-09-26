@@ -31,8 +31,18 @@ func AdaptApp(app *App, handler HandlerFunc) http.Handler {
 		errorHandler = DefaultErrorHandler
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := acquireContext(app, w, r, logger, app.maxBodyBytes)
+		rw := newResponseRecorder(w)
+		ctx := acquireContext(app, rw, r, logger, app.maxBodyBytes)
 		defer func() {
+			if ctx.holdDone != nil {
+				done := ctx.holdDone
+				ctx.holdDone = nil
+				go func() {
+					<-done
+					releaseContext(ctx)
+				}()
+				return
+			}
 			if !ctx.skipPoolRelease {
 				releaseContext(ctx)
 			}

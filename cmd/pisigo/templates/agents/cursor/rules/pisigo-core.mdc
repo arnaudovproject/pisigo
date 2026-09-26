@@ -56,8 +56,9 @@ Add only what the feature needs: `CORS`, `Timeout`, `RateLimit`, `CSRF`, `Compre
 3. Prefer `c.Bind(&in)` + validate tags over manual decode.
 4. Wire adapters behind interfaces (`store.Store`, `queue.Queue`, `pubsub.PubSub`, `db.SQL`).
 5. Register health/metrics/openapi in `main` or `cmd/` only.
-6. After changes: `go test ./...` (and race in CI).
-7. English for code comments and public docs.
+6. Check `app.Server` / `ServerWithConfig` errors; Context is pooled (detach before goroutine share).
+7. After changes: `go test ./...` (and race in CI).
+8. English for code comments and public docs.
 
 CLI: `pisigo new|dev|prod|generate|migrate|install agents`.
 

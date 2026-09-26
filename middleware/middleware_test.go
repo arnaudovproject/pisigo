@@ -6,6 +6,8 @@ package middleware_test
 import (
 	"compress/gzip"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +45,33 @@ func TestRequestID(t *testing.T) {
 	})
 	if res.Header.Get(middleware.RequestIDHeader) != "custom-id" {
 		t.Fatalf("got %q", res.Header.Get(middleware.RequestIDHeader))
+	}
+}
+
+func TestRequestIDRejectsInvalid(t *testing.T) {
+	app := pisigo.Boot()
+	app.Use(middleware.RequestID())
+	app.GET("/", func(c *pisigo.Context) error { return c.NoContent() })
+
+	res := pisigotest.Do(app, pisigotest.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{middleware.RequestIDHeader: "bad id with spaces!"},
+	})
+	got := res.Header.Get(middleware.RequestIDHeader)
+	if got == "" || got == "bad id with spaces!" {
+		t.Fatalf("expected generated id, got %q", got)
+	}
+
+	huge := strings.Repeat("a", 200)
+	res = pisigotest.Do(app, pisigotest.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{middleware.RequestIDHeader: huge},
+	})
+	got = res.Header.Get(middleware.RequestIDHeader)
+	if got == huge || len(got) > 128 {
+		t.Fatalf("expected capped generated id, got len=%d", len(got))
 	}
 }
 
@@ -102,6 +131,31 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestTimeoutDoesNotBlockOnSlowHandler(t *testing.T) {
+	app := pisigo.Boot()
+	app.Use(middleware.Timeout(40 * time.Millisecond))
+	finished := make(chan struct{})
+	app.GET("/ignore-cancel", func(c *pisigo.Context) error {
+		time.Sleep(200 * time.Millisecond)
+		close(finished)
+		return c.String(200, "late")
+	})
+	start := time.Now()
+	res := pisigotest.GET(app, "/ignore-cancel")
+	elapsed := time.Since(start)
+	if res.Code != 504 {
+		t.Fatalf("status=%d body=%s", res.Code, res.String())
+	}
+	if elapsed > 120*time.Millisecond {
+		t.Fatalf("timeout blocked waiting for handler: %v", elapsed)
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("handler never finished")
+	}
+}
+
 func TestSecureBasicAuth(t *testing.T) {
 	app := pisigo.Boot()
 	app.Use(middleware.Secure(), middleware.BasicAuth(middleware.BasicAuthConfig{
@@ -123,6 +177,37 @@ func TestSecureBasicAuth(t *testing.T) {
 	}
 	if res.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("missing secure header")
+	}
+}
+
+func TestSecureHSTSRequiresTrustedProxy(t *testing.T) {
+	app := pisigo.Boot()
+	app.Use(middleware.Secure())
+	app.GET("/", func(c *pisigo.Context) error { return c.NoContent() })
+
+	res := pisigotest.Do(app, pisigotest.Request{
+		Method:  "GET",
+		Path:    "/",
+		Headers: map[string]string{"X-Forwarded-Proto": "https"},
+	})
+	if res.Header.Get("Strict-Transport-Security") != "" {
+		t.Fatal("untrusted client must not set HSTS via X-Forwarded-Proto")
+	}
+
+	app = pisigo.Boot()
+	if err := app.SetTrustedProxies("192.0.2.1"); err != nil {
+		t.Fatal(err)
+	}
+	app.Use(middleware.Secure())
+	app.GET("/", func(c *pisigo.Context) error { return c.NoContent() })
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:1234"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rec, req)
+	if rec.Header().Get("Strict-Transport-Security") == "" {
+		t.Fatal("expected HSTS from trusted proxy")
 	}
 }
 

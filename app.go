@@ -105,7 +105,7 @@ func (a *App) Static(prefix, root string) {
 	fileServer := http.StripPrefix(prefix, http.FileServer(http.Dir(root)))
 	a.GET(prefix+"/{path...}", func(c *Context) error {
 		fileServer.ServeHTTP(c.writer, c.request)
-		c.written = true
+		c.syncFromWriter()
 		return nil
 	})
 }
@@ -118,7 +118,6 @@ func (a *App) File(urlPath, filePath string) {
 
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
-	methodsByPath := map[string]map[string]bool{}
 
 	for i := range a.routes {
 		route := a.routes[i]
@@ -128,10 +127,6 @@ func (a *App) Handler() http.Handler {
 		}
 		pattern := route.Method + " " + route.Path
 		mux.Handle(pattern, a.adapt(handler))
-		if methodsByPath[route.Path] == nil {
-			methodsByPath[route.Path] = map[string]bool{}
-		}
-		methodsByPath[route.Path][route.Method] = true
 	}
 
 	wrap := func(handler HandlerFunc) HandlerFunc {
@@ -146,17 +141,11 @@ func (a *App) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
 		if pattern == "" {
-			if _, ok := methodsByPath[r.URL.Path]; ok {
+			// Probe other methods via ServeMux's own matcher (O(methods),
+			// not O(routes)) so unmatched bot traffic stays cheap.
+			if otherMethodMatches(mux, r) {
 				methodNotAllowed.ServeHTTP(w, r)
 				return
-			}
-			for p, methods := range methodsByPath {
-				if pathMatch(p, r.URL.Path) {
-					if !methods[r.Method] {
-						methodNotAllowed.ServeHTTP(w, r)
-						return
-					}
-				}
 			}
 			notFound.ServeHTTP(w, r)
 			return
@@ -166,29 +155,30 @@ func (a *App) Handler() http.Handler {
 	})
 }
 
-func pathMatch(pattern, urlPath string) bool {
-	if !strings.Contains(pattern, "{") {
-		return pattern == urlPath
-	}
-	pp := strings.Split(strings.Trim(pattern, "/"), "/")
-	up := strings.Split(strings.Trim(urlPath, "/"), "/")
-	if len(pp) != len(up) && !strings.HasSuffix(pattern, "...") {
-		if !(len(pp) > 0 && strings.HasSuffix(pp[len(pp)-1], "...}")) {
-			return false
-		}
-	}
-	for i := 0; i < len(pp); i++ {
-		if i >= len(up) {
-			return strings.HasSuffix(pp[i], "...}")
-		}
-		if strings.HasPrefix(pp[i], "{") {
+var probeHTTPMethods = []string{
+	http.MethodGet,
+	http.MethodHead,
+	http.MethodPost,
+	http.MethodPut,
+	http.MethodPatch,
+	http.MethodDelete,
+	http.MethodOptions,
+	http.MethodConnect,
+	http.MethodTrace,
+}
+
+func otherMethodMatches(mux *http.ServeMux, r *http.Request) bool {
+	for _, method := range probeHTTPMethods {
+		if method == r.Method {
 			continue
 		}
-		if pp[i] != up[i] {
-			return false
+		probe := r.Clone(r.Context())
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func (a *App) adapt(handler HandlerFunc) http.Handler {

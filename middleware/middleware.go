@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arnaudovproject/pisigo"
@@ -69,12 +69,13 @@ func Logger() pisigo.Middleware {
 
 const RequestIDKey = "pisigo_request_id"
 const RequestIDHeader = "X-Request-ID"
+const maxRequestIDLength = 128
 
 func RequestID() pisigo.Middleware {
 	return func(next pisigo.HandlerFunc) pisigo.HandlerFunc {
 		return func(c *pisigo.Context) error {
 			id := c.HeaderGet(RequestIDHeader)
-			if id == "" {
+			if !validRequestID(id) {
 				id = newRequestID()
 			}
 			c.Set(RequestIDKey, id)
@@ -179,7 +180,7 @@ func Timeout(d time.Duration) pisigo.Middleware {
 			c.SetRequest(c.Request().WithContext(ctx))
 
 			orig := c.Response()
-			tw := &timeoutWriter{ResponseWriter: orig}
+			tw := &timeoutWriter{w: orig, h: make(http.Header)}
 			c.SetWriter(tw)
 
 			done := make(chan error, 1)
@@ -194,16 +195,27 @@ func Timeout(d time.Duration) pisigo.Middleware {
 
 			select {
 			case err := <-done:
-				c.SetWriter(orig)
-				return err
-			case <-ctx.Done():
 				tw.mu.Lock()
-				tw.timedOut = true
+				code := tw.code
+				wrote := tw.wroteHeader
 				tw.mu.Unlock()
 				c.SetWriter(orig)
-				// Wait for the handler goroutine so the pooled Context is not
-				// released while next(c) is still running.
-				<-done
+				if wrote {
+					c.MarkWritten(code)
+				}
+				return err
+			case <-ctx.Done():
+				// Write 504 under the timeoutWriter lock, then keep tw as the
+				// handler's writer so late writes are discarded without racing
+				// the real ResponseWriter. HoldForHandler protects the pool.
+				body := []byte(`{"message":"gateway timeout"}` + "\n")
+				_ = tw.fail(http.StatusGatewayTimeout, body)
+				hold := make(chan struct{})
+				go func() {
+					<-done
+					close(hold)
+				}()
+				c.HoldForHandler(hold)
 				return pisigo.ErrGatewayTimeout
 			}
 		}
@@ -211,22 +223,27 @@ func Timeout(d time.Duration) pisigo.Middleware {
 }
 
 type timeoutWriter struct {
-	http.ResponseWriter
-	mu       sync.Mutex
-	timedOut bool
+	w           http.ResponseWriter
+	h           http.Header
+	mu          sync.Mutex
+	timedOut    bool
+	wroteHeader bool
+	code        int
 }
 
 func (w *timeoutWriter) Header() http.Header {
-	return w.ResponseWriter.Header()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.h
 }
 
 func (w *timeoutWriter) WriteHeader(status int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.timedOut {
+	if w.timedOut || w.wroteHeader {
 		return
 	}
-	w.ResponseWriter.WriteHeader(status)
+	w.writeHeaderLocked(status)
 }
 
 func (w *timeoutWriter) Write(b []byte) (int, error) {
@@ -235,7 +252,58 @@ func (w *timeoutWriter) Write(b []byte) (int, error) {
 	if w.timedOut {
 		return len(b), nil
 	}
-	return w.ResponseWriter.Write(b)
+	if !w.wroteHeader {
+		w.writeHeaderLocked(http.StatusOK)
+	}
+	return w.w.Write(b)
+}
+
+func (w *timeoutWriter) writeHeaderLocked(status int) {
+	dst := w.w.Header()
+	for k, vv := range w.h {
+		dst[k] = vv
+	}
+	w.w.WriteHeader(status)
+	w.wroteHeader = true
+	w.code = status
+}
+
+// fail marks the writer timed out and, if nothing was written yet, sends the
+// timeout response on the underlying writer.
+func (w *timeoutWriter) fail(status int, body []byte) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.timedOut = true
+	if w.wroteHeader {
+		return false
+	}
+	w.w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.w.WriteHeader(status)
+	_, _ = w.w.Write(body)
+	w.wroteHeader = true
+	w.code = status
+	return true
+}
+
+func (w *timeoutWriter) TimedOut() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.timedOut
+}
+
+func (w *timeoutWriter) Unwrap() http.ResponseWriter {
+	return w.w
+}
+
+func (w *timeoutWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timedOut {
+		return
+	}
+	if f, ok := w.w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func Secure() pisigo.Middleware {
@@ -247,7 +315,7 @@ func Secure() pisigo.Middleware {
 			c.Header("Referrer-Policy", "no-referrer")
 			c.Header("Content-Security-Policy", "default-src 'self'")
 			c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-			if c.Request().TLS != nil || strings.EqualFold(c.HeaderGet("X-Forwarded-Proto"), "https") {
+			if c.IsHTTPS() {
 				c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 			return next(c)
@@ -340,7 +408,28 @@ func contains(list []string, value string) bool {
 func newRequestID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		n := requestIDFallback.Add(1)
+		return fmt.Sprintf("%d-%d", time.Now().UnixNano(), n)
 	}
 	return hex.EncodeToString(b)
 }
+
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLength {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+var requestIDFallback atomic.Uint64

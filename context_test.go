@@ -139,3 +139,25 @@ func TestFormValueRespectsBodyLimit(t *testing.T) {
 		t.Fatalf("status=%d", res.Code)
 	}
 }
+
+func TestFileTracksRealStatus(t *testing.T) {
+	app := pisigo.Boot()
+	var logged int
+	app.Use(func(next pisigo.HandlerFunc) pisigo.HandlerFunc {
+		return func(c *pisigo.Context) error {
+			err := next(c)
+			logged = c.StatusCode()
+			return err
+		}
+	})
+	app.GET("/missing-file", func(c *pisigo.Context) error {
+		return c.File("/definitely/does/not/exist-" + t.Name())
+	})
+	res := pisigotest.GET(app, "/missing-file")
+	if res.Code != 404 {
+		t.Fatalf("client status=%d", res.Code)
+	}
+	if logged != 404 {
+		t.Fatalf("StatusCode after ServeFile=%d want 404", logged)
+	}
+}

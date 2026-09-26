@@ -36,6 +36,9 @@ func (c *Context) Status(status int) {
 }
 
 func (c *Context) writeStatus(status int) {
+	if timedOutWriter(c.writer) {
+		return
+	}
 	c.status = status
 	if !c.written {
 		c.writer.WriteHeader(status)
@@ -44,6 +47,9 @@ func (c *Context) writeStatus(status int) {
 }
 
 func (c *Context) String(status int, value string) error {
+	if timedOutWriter(c.writer) {
+		return nil
+	}
 	c.writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.writeStatus(status)
 	_, err := fmt.Fprint(c.writer, value)
@@ -51,6 +57,9 @@ func (c *Context) String(status int, value string) error {
 }
 
 func (c *Context) HTML(status int, value string) error {
+	if timedOutWriter(c.writer) {
+		return nil
+	}
 	c.writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.writeStatus(status)
 	_, err := fmt.Fprint(c.writer, value)
@@ -58,18 +67,27 @@ func (c *Context) HTML(status int, value string) error {
 }
 
 func (c *Context) JSON(status int, data any) error {
+	if timedOutWriter(c.writer) {
+		return nil
+	}
 	c.writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.writeStatus(status)
 	return json.NewEncoder(c.writer).Encode(data)
 }
 
 func (c *Context) XML(status int, data any) error {
+	if timedOutWriter(c.writer) {
+		return nil
+	}
 	c.writer.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	c.writeStatus(status)
 	return xml.NewEncoder(c.writer).Encode(data)
 }
 
 func (c *Context) Data(status int, contentType string, data []byte) error {
+	if timedOutWriter(c.writer) {
+		return nil
+	}
 	c.writer.Header().Set("Content-Type", contentType)
 	c.writeStatus(status)
 	_, err := c.writer.Write(data)
@@ -84,14 +102,17 @@ func (c *Context) NoContent() error {
 
 func (c *Context) Redirect(status int, location string) error {
 	http.Redirect(c.writer, c.request, location, status)
-	c.status = status
-	c.written = true
+	c.syncFromWriter()
+	if !c.written {
+		c.status = status
+		c.written = true
+	}
 	return nil
 }
 
 func (c *Context) File(path string) error {
 	http.ServeFile(c.writer, c.request, path)
-	c.written = true
+	c.syncFromWriter()
 	return nil
 }
 
@@ -102,7 +123,7 @@ func (c *Context) Download(filePath string, filename string) error {
 		fmt.Sprintf(`attachment; filename="%s"`, safe),
 	)
 	http.ServeFile(c.writer, c.request, filePath)
-	c.written = true
+	c.syncFromWriter()
 	return nil
 }
 
@@ -121,6 +142,23 @@ func sanitizeContentDispositionFilename(name string) string {
 		return "download"
 	}
 	return name
+}
+
+func timedOutWriter(w http.ResponseWriter) bool {
+	type timedOutFlag interface {
+		TimedOut() bool
+	}
+	for w != nil {
+		if t, ok := w.(timedOutFlag); ok && t.TimedOut() {
+			return true
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		w = u.Unwrap()
+	}
+	return false
 }
 
 func (c *Context) Cookie(cookie *http.Cookie) {

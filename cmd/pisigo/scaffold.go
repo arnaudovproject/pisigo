@@ -25,6 +25,7 @@ func NewProject(args []string) {
 		"main.go": `package main
 
 import (
+	"log"
 	"log/slog"
 
 	"github.com/arnaudovproject/pisigo"
@@ -48,7 +49,9 @@ func main() {
 		return c.JSON(200, map[string]string{"status": "ok"})
 	})
 
-	app.Server("0.0.0.0", 8080)
+	if err := app.Server("0.0.0.0", 8080); err != nil {
+		log.Fatal(err)
+	}
 }
 `,
 		".env.example": "PORT=8080\nLOG_LEVEL=info\n",

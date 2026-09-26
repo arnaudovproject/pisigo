@@ -65,6 +65,21 @@ func TestMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestMethodNotAllowedWildcard(t *testing.T) {
+	app := pisigo.Boot()
+	app.GET("/files/{path...}", func(c *pisigo.Context) error {
+		return c.String(200, "ok")
+	})
+	res := pisigotest.Do(app, pisigotest.Request{Method: "DELETE", Path: "/files/a/b"})
+	if res.Code != 405 {
+		t.Fatalf("status=%d", res.Code)
+	}
+	res = pisigotest.GET(app, "/missing")
+	if res.Code != 404 {
+		t.Fatalf("status=%d", res.Code)
+	}
+}
+
 func TestANY(t *testing.T) {
 	app := pisigo.Boot()
 	app.ANY("/any", func(c *pisigo.Context) error {

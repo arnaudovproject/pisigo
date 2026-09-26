@@ -45,6 +45,8 @@ Keep handlers thin. Pass a `Deps` struct; avoid globals.
 - Use route groups with leading `/` segments (`Group("/api")`, `GET("/users")` or `GET("users")`)
 - Map domain errors → HTTP errors in one place
 - Respect `c.Request().Context()` (Timeout, DB, outbound calls)
+- Check `app.Server` / `ServerWithConfig` errors
+- Treat `*pisigo.Context` as request-scoped (pool); detach before sharing across goroutines
 - Run `go test ./...` after meaningful changes
 
 ## Don't
