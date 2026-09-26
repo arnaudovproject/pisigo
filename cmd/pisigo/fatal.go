@@ -1,0 +1,14 @@
+// Pisigo framework — https://pisigo.com
+// Author: Ventsislav Arnaudov — https://varnaudov.com
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "pisigo: "+format+"\n", args...)
+	os.Exit(1)
+}

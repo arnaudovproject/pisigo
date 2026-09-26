@@ -1,0 +1,53 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Cursor / AI tooling (local only — never publish)
+.cursor/
+.cursorrules
+.claude/
+.codex/
+.github/copilot*
+AGENTS.md
+.agent/
+.agents/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Go
+bin/
+dist/
+tmp/
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+profile.out
+cpu.prof
+mem.prof
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Logs / local runtime
+*.log
+logs/
+.cache/

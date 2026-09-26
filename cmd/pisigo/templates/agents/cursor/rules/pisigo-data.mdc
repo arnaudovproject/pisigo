@@ -1,0 +1,49 @@
+---
+description: Pisigo data adapters, store/queue/pubsub, migrations
+globs: "**/repository/**/*.go,**/adapters/**/*.go,**/migrate/**/*.go,**/migrations/**/*.sql,**/db/**/*.go"
+alwaysApply: false
+---
+
+# Data & messaging
+
+https://pisigo.com
+
+## SQL
+
+```go
+sqlDB, err := postgres.OpenConfig(postgres.Config{...})
+// sqlite.OpenMemory() for tests (single connection)
+```
+
+Use `db.SQL`: `Get`, `Select`, `Exec`, `Transaction`. Prefer `db` struct tags for scanning.
+
+Migrations:
+
+```bash
+pisigo migrate create add_users
+```
+
+```go
+m := migrate.New(sqlDB, "migrations")
+_ = m.Up(ctx)
+```
+
+Files: `-- +migrate Up` / `-- +migrate Down`. Placeholders `?` (auto `$n` on Postgres).
+
+## Store / Queue / PubSub
+
+- Interfaces: `store.Store`, `queue.Queue`, `pubsub.PubSub`
+- Local/dev: `adapters/memory`
+- Prod cache/rate-limit: `adapters/redis`
+- Streams: `adapters/nats` (JetStream queue + core pubsub)
+
+Do not import Redis/NATS from domain code — depend on interfaces.
+
+## Mongo
+
+`mongodb.Open(mongodb.Config{URI, Database})` — separate from `db.SQL`.
+
+## Ops near data
+
+- `health.Ready("db", sqlDB.Ping)`
+- Cache responses only for safe GET/HEAD via `middleware.Cache`

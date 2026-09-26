@@ -1,0 +1,51 @@
+---
+description: Pisigo HTTP handlers, middleware, auth, errors
+globs: "**/*handler*.go,**/*route*.go,**/middleware/**/*.go,**/http/**/*.go"
+alwaysApply: false
+---
+
+# HTTP patterns
+
+https://pisigo.com
+
+## Handler
+
+```go
+func createUser(svc *service.Users) pisigo.HandlerFunc {
+  return func(c *pisigo.Context) error {
+    var in createUserDTO
+    if err := c.Bind(&in); err != nil { return err }
+    out, err := svc.Create(c.Request().Context(), in)
+    if err != nil { return mapErr(err) }
+    return c.JSON(201, out)
+  }
+}
+```
+
+DTO: `json` + `validate:"required,email"` tags. `Bind` decodes + validates.
+
+## Errors
+
+- Domain not found → `pisigo.ErrNotFound` or `NewHTTPError(404, "...")`
+- Validation already returns 400 with `details.fields`
+- Never panic in handlers; keep `middleware.Recover()` outermost
+
+## Auth
+
+```go
+cfg := auth.DefaultJWTConfig(secret)
+app.Use(auth.JWT(cfg))
+admin := app.Group("/admin", auth.RequireRoles("admin"))
+app.Use(auth.APIKey("X-API-Key", valid))
+```
+
+Sessions: `session.Middleware(session.Config{Store: session.NewMemoryStore()})` then `session.FromContext(c)`.
+
+## Middleware order
+
+`Recover` → `RequestID` → `Logger` → security/CORS → auth → feature middleware → handler.
+`Timeout` needs handlers that respect `c.Request().Context()`.
+
+## Response helpers
+
+`JSON`, `String`, `HTML`, `Data`, `NoContent`, `Redirect`, `File`, `Download`, `Stream`. Prefer these over raw `http.ResponseWriter` unless WS/SSE/metrics require it.

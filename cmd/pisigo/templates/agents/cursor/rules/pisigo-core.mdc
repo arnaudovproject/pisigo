@@ -1,0 +1,64 @@
+---
+description: Pisigo framework core — use for any work in this project
+alwaysApply: true
+---
+
+# Pisigo (https://pisigo.com)
+
+Author: Ventsislav Arnaudov (https://varnaudov.com). Module: `github.com/arnaudovproject/pisigo`.
+
+## Mental model
+
+Pisigo = small HTTP core + optional packages. Prefer framework helpers over reinventing routing, errors, binding, middleware, health, or adapters.
+
+- Boot: `app := pisigo.Boot()`
+- Handlers: `func(c *pisigo.Context) error`
+- Middleware: `func(next pisigo.HandlerFunc) pisigo.HandlerFunc` via `app.Use(...)` or `app.Group(prefix, mw...)`
+- Return `*pisigo.HTTPError` / sentinels (`ErrNotFound`, `ErrUnauthorized`, …). Do not write status ad-hoc unless using response helpers.
+- Groups join paths safely: `Group("/api")` + `GET("/users")` or `GET("users")` both work.
+
+## Default stack
+
+```go
+app.Use(middleware.Recover(), middleware.RequestID(), middleware.Logger(), middleware.Secure())
+```
+
+Add only what the feature needs: `CORS`, `Timeout`, `RateLimit`, `CSRF`, `Compress`, `Cache`, `auth.JWT`, `session.Middleware`.
+
+## Package map (import what you need)
+
+| Need | Package |
+|------|---------|
+| HTTP core | `pisigo` |
+| Middleware | `pisigo/middleware` |
+| JWT / API key / roles | `pisigo/auth` |
+| Cookie sessions | `pisigo/session` |
+| Env/JSON config | `pisigo/config` |
+| SQL | `pisigo/db` + `adapters/postgres|mysql|sqlite|mssql` |
+| Mongo | `adapters/mongodb` |
+| Cache/KV | `store` + `adapters/memory|redis` |
+| Jobs | `queue` + `adapters/memory|redis|nats` |
+| Messaging | `pubsub` + `adapters/memory|nats` |
+| Migrations | `pisigo/migrate` |
+| Health | `pisigo/health` |
+| Prometheus | `pisigo/metrics` |
+| OTel | `pisigo/otelx` |
+| OpenAPI | `pisigo/openapi` |
+| WS / SSE | `pisigo/websocket`, `pisigo/sse` |
+| Resilience | `pisigo/circuit` |
+| i18n | `pisigo/i18n` |
+| Tests | `pisigo/testing` (`pisigotest`) |
+
+## Agent rules of work
+
+1. Reuse Pisigo APIs before adding third-party HTTP kits.
+2. Keep handlers thin; put domain logic in packages (`internal/...`).
+3. Prefer `c.Bind(&in)` + validate tags over manual decode.
+4. Wire adapters behind interfaces (`store.Store`, `queue.Queue`, `pubsub.PubSub`, `db.SQL`).
+5. Register health/metrics/openapi in `main` or `cmd/` only.
+6. After changes: `go test ./...` (and race in CI).
+7. English for code comments and public docs.
+
+CLI: `pisigo new|dev|prod|generate|migrate|install agents`.
+
+After scaffolding an app, run `pisigo install agents all` in the app root so Cursor/Claude/Codex get Pisigo-aware rules.

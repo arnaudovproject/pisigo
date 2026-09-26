@@ -1,0 +1,43 @@
+---
+description: Recommended project layout when building apps with Pisigo
+alwaysApply: true
+---
+
+# Project structure (Pisigo apps)
+
+Website: https://pisigo.com
+
+Prefer a clear layout so agents edit the right files with minimal search:
+
+```
+cmd/<app>/main.go          # boot, middleware, DI wiring, Server()
+internal/
+  http/                    # route registration, handlers, DTOs
+    router.go              # Register(app *pisigo.App, deps Deps)
+    <feature>_handler.go
+    <feature>_dto.go
+  domain/                  # business types + ports (interfaces)
+  service/                 # use-cases
+  repository/              # db/mongo/redis implementations
+migrations/                # SQL migrate files
+web/ or static/            # optional static assets
+.env.example
+```
+
+## Routing registration
+
+- One `Register(app, deps)` (or feature `RegisterX`) — avoid scattering `app.GET` across random files.
+- Feature groups: `g := app.Group("/api/v1/users", authMW)`.
+- Named routes when you need reverse URLs: `.SetName("users.show")`.
+- Static: `app.Static("/assets", "./web/assets")` or `app.File`.
+
+## File naming
+
+- `*_handler.go` — HTTP only (bind, call service, map errors).
+- `*_service.go` — business rules.
+- `*_repository.go` — persistence.
+- `*_test.go` beside code; use `pisigotest.GET/POST` for HTTP.
+
+## Dependencies
+
+Pass a small `Deps` struct into registers (db, store, logger). Do not use global mutable clients.
