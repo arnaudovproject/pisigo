@@ -1,6 +1,3 @@
-// Pisigo framework — https://pisigo.com
-// Author: Ventsislav Arnaudov — https://varnaudov.com
-
 package main
 
 import (
@@ -68,7 +65,7 @@ func TestInstallAgentsAll(t *testing.T) {
 			t.Fatalf("missing %s: %v", rel, err)
 		}
 		body := string(data)
-		if !strings.Contains(body, "pisigo.com") || !strings.Contains(strings.ToLower(body), "pisigo") {
+		if !strings.Contains(strings.ToLower(body), "pisigo") {
 			t.Fatalf("%s missing framework guidance", rel)
 		}
 	}

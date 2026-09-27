@@ -1,6 +1,3 @@
-// Pisigo framework — https://pisigo.com
-// Author: Ventsislav Arnaudov — https://varnaudov.com
-
 package sqlite
 
 import (

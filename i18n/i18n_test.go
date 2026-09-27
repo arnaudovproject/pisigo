@@ -1,6 +1,3 @@
-// Pisigo framework — https://pisigo.com
-// Author: Ventsislav Arnaudov — https://varnaudov.com
-
 package i18n_test
 
 import (

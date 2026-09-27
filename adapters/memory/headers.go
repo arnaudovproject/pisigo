@@ -1,6 +1,3 @@
-// Pisigo framework — https://pisigo.com
-// Author: Ventsislav Arnaudov — https://varnaudov.com
-
 package memory
 
 func copyHeaders(in map[string]string) map[string]string {

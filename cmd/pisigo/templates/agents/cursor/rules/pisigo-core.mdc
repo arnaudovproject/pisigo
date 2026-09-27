@@ -3,9 +3,9 @@ description: Pisigo framework core — use for any work in this project
 alwaysApply: true
 ---
 
-# Pisigo (https://pisigo.com)
+# Pisigo
 
-Author: Ventsislav Arnaudov (https://varnaudov.com). Module: `github.com/arnaudovproject/pisigo`.
+Module: `github.com/arnaudovproject/pisigo`.
 
 ## Mental model
 

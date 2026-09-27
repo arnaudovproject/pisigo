@@ -6,8 +6,6 @@ alwaysApply: false
 
 # HTTP patterns
 
-https://pisigo.com
-
 ## Handler
 
 ```go

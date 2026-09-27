@@ -1,7 +1,5 @@
 # Pisigo structure
 
-https://pisigo.com
-
 - `cmd/<app>/main.go` — composition root only
 - `internal/http` — Register routes + handlers + DTOs
 - `internal/service` — business logic

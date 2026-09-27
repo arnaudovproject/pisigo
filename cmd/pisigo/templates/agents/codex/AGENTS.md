@@ -1,6 +1,6 @@
 # AGENTS.md — Pisigo
 
-Framework: **Pisigo** (https://pisigo.com) by Ventsislav Arnaudov (https://varnaudov.com).  
+Framework: **Pisigo**.  
 Go module: `github.com/arnaudovproject/pisigo`.
 
 ## Mission for agents

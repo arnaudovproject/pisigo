@@ -1,6 +1,5 @@
 # Pisigo project instructions
 
-Website: https://pisigo.com · Author: Ventsislav Arnaudov (https://varnaudov.com)  
 Module: `github.com/arnaudovproject/pisigo`
 
 This app is built with **Pisigo**. Prefer Pisigo APIs over new HTTP frameworks or ad-hoc `net/http` routers.

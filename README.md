@@ -2,8 +2,6 @@
 
 **Pisigo** is a lightweight, production-oriented HTTP framework for Go.
 
-Website: [https://pisigo.com](https://pisigo.com)  
-Author: [Ventsislav Arnaudov](https://varnaudov.com)  
 Module: `github.com/arnaudovproject/pisigo`
 
 ---
@@ -422,9 +420,6 @@ Also supports `LoadJSONFile` (nested keys flattened as `db.host`) and `LoadEnv`.
 
 ---
 
-## License and authorship
+## License
 
-Framework site: [https://pisigo.com](https://pisigo.com)  
-Author: **Ventsislav Arnaudov** — [https://varnaudov.com](https://varnaudov.com)
-
-Every source file carries this attribution. Contributions should keep the same header
+MIT — see [LICENSE](LICENSE).

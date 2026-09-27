@@ -5,8 +5,6 @@ alwaysApply: true
 
 # Project structure (Pisigo apps)
 
-Website: https://pisigo.com
-
 Prefer a clear layout so agents edit the right files with minimal search:
 
 ```

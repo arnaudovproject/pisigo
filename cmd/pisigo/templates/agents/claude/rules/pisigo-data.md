@@ -8,8 +8,6 @@ paths:
 
 # Pisigo data
 
-https://pisigo.com
-
 SQL via `db.SQL` (`Get`/`Select`/`Exec`/`Transaction`) and adapters `postgres|mysql|sqlite|mssql`. Tests: `sqlite.OpenMemory()`.
 
 Migrations: `pisigo migrate create <name>` then `migrate.New(db, "migrations").Up(ctx)`. Sections `-- +migrate Up/Down`.

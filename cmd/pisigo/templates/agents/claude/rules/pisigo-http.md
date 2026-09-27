@@ -8,8 +8,6 @@ paths:
 
 # Pisigo HTTP
 
-https://pisigo.com
-
 Handlers return `error`. Bind with `c.Bind(&dto)` (`json` + `validate` tags). Respond with `c.JSON` / `String` / `NoContent` / `Redirect`.
 
 Auth: `auth.JWT`, `auth.APIKey`, `auth.RequireRoles`. Sessions: `session.Middleware` + `session.FromContext`.

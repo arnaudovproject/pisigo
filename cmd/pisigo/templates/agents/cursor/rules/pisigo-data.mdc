@@ -6,8 +6,6 @@ alwaysApply: false
 
 # Data & messaging
 
-https://pisigo.com
-
 ## SQL
 
 ```go
